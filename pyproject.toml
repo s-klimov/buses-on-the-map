@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "buses-on-the-map"
+version = "0.1.0"
+description = ""
+authors = ["Sergei Klimov <s.klimov@bk.ru>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+trio-websocket = "^0.10.3"
+
+[tool.poetry.group.dev.dependencies]
+blue = "^0.9.1"
+pytest-trio = "^0.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
