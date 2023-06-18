@@ -41,14 +41,7 @@ async def main():
         async with open_websocket_url('ws://127.0.0.1:8000/ws') as ws:
             while True:
                 coordinates = await anext(bus_d644ve)
-                buses = {
-                    "msgType": "Buses",
-                    "buses": [
-                        coordinates,
-                        {"busId": "a134aa", "lat": 55.7494, "lng": 37.621, "route": "670к"},
-                    ],
-                }
-                await ws.send_message(json.dumps(buses))
+                await ws.send_message(json.dumps(coordinates))
     except OSError as ose:
         print('Connection attempt failed: %s' % ose, file=stderr)
 
