@@ -7,12 +7,11 @@ from trio_websocket import serve_websocket, ConnectionClosed
 async def send_message(request):
     ws = await request.accept()
 
-    buses = {
-        'msgType': 'Buses',
-        'buses': [],
-    }
-
     while True:
+        buses = {
+            'msgType': 'Buses',
+            'buses': [],
+        }
         try:
             message = await ws.get_message()
             coordinate = json.loads(message)
