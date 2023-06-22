@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import trio
@@ -7,43 +8,50 @@ from sys import stderr
 from trio_websocket import open_websocket_url
 import itertools
 
-INTERVAL = 2
+INTERVAL = 0.1
 ROUTES_DIR = 'routes'
 
 
-async def fetch():
-    bus_id = 'd644ve'
+async def load_routes(directory_path=ROUTES_DIR):
+    for filename in os.listdir(directory_path):
+        if filename.endswith('.json'):
+            filepath = os.path.join(Path(directory_path), filename)
+            async with await trio.open_file(
+                filepath, 'r', encoding='utf8'
+            ) as afp:
+                route_full_info = await afp.read()
+                yield json.loads(route_full_info)
 
-    route612_filename = Path(ROUTES_DIR) / '120.json'
-    async with await trio.open_file(route612_filename) as afp:
-        route_full_info = await afp.read()
-        route = json.loads(route_full_info)
+
+async def run_bus(url, bus_id, route, /):
 
     coordinates = (
         route['coordinates'] + route['coordinates'][::-1]
     )  # добавляем обратный путь
 
-    for lat, long in itertools.cycle(coordinates):
-        coordinate = {
-            'busId': bus_id,
-            'lat': lat,
-            'lng': long,
-            'route': route['name'],
-        }
-        yield coordinate
-        await trio.sleep(INTERVAL)
-
-
-async def main():
-    bus_d644ve = fetch()
-
     try:
-        async with open_websocket_url('ws://127.0.0.1:8000/ws') as ws:
-            while True:
-                coordinates = await anext(bus_d644ve)
-                await ws.send_message(json.dumps(coordinates))
+        async with open_websocket_url(url) as ws:
+            for lat, long in itertools.cycle(coordinates):
+                coordinate = {
+                    'busId': bus_id,
+                    'lat': lat,
+                    'lng': long,
+                    'route': route['name'],
+                }
+                await ws.send_message(json.dumps(coordinate))
+                await trio.sleep(INTERVAL)
     except OSError as ose:
         print('Connection attempt failed: %s' % ose, file=stderr)
 
 
-trio.run(main)
+async def main():
+
+    async with trio.open_nursery() as nursery:
+        async for route in load_routes():
+            nursery.start_soon(
+                run_bus, 'ws://127.0.0.1:8080/ws', route['name'], route
+            )
+
+
+if __name__ == '__main__':
+    trio.run(main)
