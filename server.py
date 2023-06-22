@@ -5,7 +5,9 @@ import trio.testing
 from trio_websocket import serve_websocket, ConnectionClosed
 
 
-send_channel, receive_channel = trio.open_memory_channel(0)
+MAX_BUSES = 5000  # максимальное количество автобусов на маршруте
+
+send_channel, receive_channel = trio.open_memory_channel(MAX_BUSES)
 buses = dict()
 
 
@@ -13,8 +15,11 @@ async def send_message(request):
     ws = await request.accept()
 
     async for message in receive_channel:
+        buse = json.loads(message)
+        buses[buse['busId']] = buse
+
         buses_msg = json.dumps(
-            {'msgType': 'Buses', 'buses': json.loads(message)}
+            {'msgType': 'Buses', 'buses': list(buses.values())}
         )
 
         try:
@@ -28,12 +33,8 @@ async def get_message(request):
 
     try:
         while message := await ws.get_message():
-            buse = json.loads(message)
-            buses[buse['busId']] = buse
 
-            await send_channel.send(
-                json.dumps(list(buses.values()), ensure_ascii=False)
-            )
+            await send_channel.send(message)
     except ConnectionClosed:
         pass
 
