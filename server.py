@@ -5,9 +5,7 @@ import trio.testing
 from trio_websocket import serve_websocket, ConnectionClosed
 
 
-MAX_BUSES = 5000  # максимальное количество автобусов на маршруте
-
-send_channel, receive_channel = trio.open_memory_channel(MAX_BUSES)
+send_channel, receive_channel = trio.open_memory_channel(0)
 buses = dict()
 
 
