@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 from collections import deque
@@ -5,14 +6,16 @@ from pathlib import Path
 from random import randrange
 
 import trio
-from sys import stderr
 
+from trio import MemoryReceiveChannel, MemorySendChannel
 from trio_websocket import open_websocket_url
 import itertools
 
-INTERVAL = 0.1
-ROUTES_DIR = 'routes'
-MAX_BUSES_ON_ROUTE = 3  # максимальное количество автобусов на маршруте
+INTERVAL = 0.1           # интервал в секундах между перемещениями автобусов по точкам маршрутов на карте
+ROUTES_DIR = 'routes'    # папка с маршрутами автобусов
+MAX_BUSES_ON_ROUTE = 100   # максимальное количество автобусов на маршруте
+BUS_NUM_LENGTH = 3       # количество символов в номере автобуса
+SOCKETS_COUNT = 5        # количество открытых сокетов для обмена с сервером
 
 
 async def load_routes(directory_path=ROUTES_DIR):
@@ -26,42 +29,63 @@ async def load_routes(directory_path=ROUTES_DIR):
                 yield json.loads(route_full_info)
 
 
-async def run_bus(url, bus_id, route, /):
+async def run_bus(
+    send_channel: MemorySendChannel, bus_id: str, route: dict, /
+):
 
     coordinates = (
         route['coordinates'] + route['coordinates'][::-1]
     )  # добавляем обратный путь
 
     points = deque(coordinates)
-    points.rotate(randrange(len(coordinates)))  # поездку начинаем с произвольной точки маршрута
+    points.rotate(
+        randrange(len(coordinates))
+    )  # поездку начинаем с произвольной точки маршрута
 
-    try:
-        async with open_websocket_url(url) as ws:
-            for lat, long in itertools.cycle(points):
-                coordinate = {
-                    'busId': bus_id,
-                    'lat': lat,
-                    'lng': long,
-                    'route': route['name'],
-                }
-                await ws.send_message(json.dumps(coordinate))
-                await trio.sleep(INTERVAL)
-    except OSError as ose:
-        print('Connection attempt failed: %s' % ose, file=stderr)
+    for lat, long in itertools.cycle(points):
+        coordinate = {
+            'busId': bus_id,
+            'lat': lat,
+            'lng': long,
+            'route': route['name'],
+        }
+        await send_channel.send(json.dumps(coordinate))
+        await trio.sleep(INTERVAL)
 
 
 def generate_bus_id(route_id, bus_index):
-    return f"{route_id}-{str(bus_index).zfill(3)}"
+    return f'{route_id}-{str(bus_index).zfill(BUS_NUM_LENGTH)}'
+
+
+async def send_updates(
+    server_address: str, receive_channel: MemoryReceiveChannel, /
+):
+    """
+    Отправляет координаты автобуса по web-сокету. Web-сокет выбирается случайным образом из заданных.
+    :param server_address: Адрес сервера
+    :param receive_channel: Канал для приема координат автобуса для последующей отправки.
+    """
+    async with contextlib.AsyncExitStack() as stack:
+        sockets = [
+            await stack.enter_async_context(open_websocket_url(server_address))
+            for _ in range(SOCKETS_COUNT)
+        ]
+        async for message in receive_channel:
+            await sockets[randrange(SOCKETS_COUNT)].send_message(message)
 
 
 async def main():
+    server_address = 'ws://127.0.0.1:8080/ws'
+    send_channel, receive_channel = trio.open_memory_channel(0)
 
     async with trio.open_nursery() as nursery:
+        nursery.start_soon(send_updates, server_address, receive_channel)
+
         async for route in load_routes():
             for bus_index in range(randrange(1, MAX_BUSES_ON_ROUTE)):
                 nursery.start_soon(
                     run_bus,
-                    'ws://127.0.0.1:8080/ws',
+                    send_channel,
                     generate_bus_id(route['name'], bus_index),
                     route,
                 )
