@@ -1,25 +1,28 @@
-import contextlib
+from contextlib import suppress, AsyncExitStack
+import itertools
 import json
+import logging
 import os
 from collections import deque
 from pathlib import Path
 from random import randrange
 
+import asyncclick as click
+import asyncstdlib as a
 import trio
-
 from trio import MemoryReceiveChannel, MemorySendChannel
 from trio_websocket import open_websocket_url
-import itertools
 
-INTERVAL = 0.1           # интервал в секундах между перемещениями автобусов по точкам маршрутов на карте
+
 ROUTES_DIR = 'routes'    # папка с маршрутами автобусов
-MAX_BUSES_ON_ROUTE = 100   # максимальное количество автобусов на маршруте
 BUS_NUM_LENGTH = 3       # количество символов в номере автобуса
-SOCKETS_COUNT = 5        # количество открытых сокетов для обмена с сервером
 
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
+logger = logging.getLogger('fake-bus')
 
 async def load_routes(directory_path=ROUTES_DIR):
     for filename in os.listdir(directory_path):
+        logger.info("Открываем файл %s" % (filename, ))
         if filename.endswith('.json'):
             filepath = os.path.join(Path(directory_path), filename)
             async with await trio.open_file(
@@ -30,66 +33,108 @@ async def load_routes(directory_path=ROUTES_DIR):
 
 
 async def run_bus(
-    send_channel: MemorySendChannel, bus_id: str, route: dict, /
+    send_channel: MemorySendChannel, bus_id: str, points: list, route_name: str, refresh_timeout: float,/
 ):
+    """
 
-    coordinates = (
-        route['coordinates'] + route['coordinates'][::-1]
-    )  # добавляем обратный путь
-
-    points = deque(coordinates)
-    points.rotate(
-        randrange(len(coordinates))
-    )  # поездку начинаем с произвольной точки маршрута
-
+    :param send_channel:
+    :param bus_id:
+    :param points:
+    :param route_name:
+    :param refresh_timeout: Интервал в секундах между перемещениями автобусов по точкам маршрутов на карте.
+    """
     for lat, long in itertools.cycle(points):
         coordinate = {
             'busId': bus_id,
             'lat': lat,
             'lng': long,
-            'route': route['name'],
+            'route': route_name,
         }
         await send_channel.send(json.dumps(coordinate))
-        await trio.sleep(INTERVAL)
+        await trio.sleep(refresh_timeout)
 
 
-def generate_bus_id(route_id, bus_index):
-    return f'{route_id}-{str(bus_index).zfill(BUS_NUM_LENGTH)}'
+def generate_bus_id(route_id, bus_index, emulator_id):
+    return f'{route_id}-{emulator_id}{str(bus_index).zfill(BUS_NUM_LENGTH)}'
 
 
 async def send_updates(
-    server_address: str, receive_channel: MemoryReceiveChannel, /
+    server: str, websockets_number: int, receive_channel: MemoryReceiveChannel, /
 ):
     """
     Отправляет координаты автобуса по web-сокету. Web-сокет выбирается случайным образом из заданных.
-    :param server_address: Адрес сервера
+    :param server: Адрес сервера.
+    :param websockets_number: Количество открытых web-сокетов.
     :param receive_channel: Канал для приема координат автобуса для последующей отправки.
     """
-    async with contextlib.AsyncExitStack() as stack:
+    async with AsyncExitStack() as stack:
         sockets = [
-            await stack.enter_async_context(open_websocket_url(server_address))
-            for _ in range(SOCKETS_COUNT)
+            await stack.enter_async_context(open_websocket_url(server))
+            for _ in range(websockets_number)
         ]
         async for message in receive_channel:
-            await sockets[randrange(SOCKETS_COUNT)].send_message(message)
+            await sockets[randrange(websockets_number)].send_message(message)
 
 
-async def main():
-    server_address = 'ws://127.0.0.1:8080/ws'
+def validate_routes_number(ctx, param, value):
+    if value < 1 or value > 595:
+        raise click.BadParameter("Количество маршрутов должно быть от 1 до 595.")
+    return value
+
+
+@click.command()
+@click.option("--server", default='ws://127.0.0.1:8080/ws', show_default=True, help="Адрес сервера.")
+@click.option("--routes_number", default=595, show_default=True, callback=validate_routes_number, help="Количество маршрутов (от 1 до 595).")
+@click.option("--buses_per_route", default=100, show_default=True, help="Количество автобусов на каждом маршруте.")
+@click.option("--websockets_number", default=10, show_default=True, help="Количество открытых веб-сокетов.")
+@click.option("--emulator_id", default="", help="Префикс к busId на случай запуска нескольких экземпляров имитатора.")
+@click.option("--refresh_timeout", type=float, default=0.1, show_default=True, help="Задержка в обновлении координат сервера.")
+@click.option('-v', '--verbose', count=True, help="Настройка логирования.")  # https://click.palletsprojects.com/en/8.1.x/options/#counting
+async def main(server, routes_number, buses_per_route, websockets_number, emulator_id, refresh_timeout, verbose):
+
+    if verbose in [0, 1]:
+        level = logging.ERROR
+    elif verbose == 2:
+        level = logging.WARNING
+    elif verbose == 3:
+        level = logging.INFO
+    else:
+        level = logging.DEBUG
+
+    logger.setLevel(level)
+
     send_channel, receive_channel = trio.open_memory_channel(0)
 
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(send_updates, server_address, receive_channel)
+        nursery.start_soon(send_updates, server, websockets_number, receive_channel)
 
-        async for route in load_routes():
-            for bus_index in range(randrange(1, MAX_BUSES_ON_ROUTE)):
+        async for i, route in a.enumerate(load_routes()):
+            if i == routes_number:
+                break
+
+            coordinates = (
+                route['coordinates'] + route['coordinates'][::-1]
+            )  # добавляем обратный путь
+
+            points = deque(coordinates)
+
+            for bus_index in range(randrange(1, buses_per_route)):
+                logger.debug("Запускаем автобус %s по маршруту %s" % (bus_index, route['name'],))
+
+                points.rotate(
+                    randrange(len(coordinates))
+                )  # поездку начинаем с произвольной точки маршрута
+
                 nursery.start_soon(
                     run_bus,
                     send_channel,
-                    generate_bus_id(route['name'], bus_index),
-                    route,
+                    generate_bus_id(route['name'], bus_index, emulator_id),
+                    points.copy(),
+                    route['name'],
+                    refresh_timeout,
                 )
 
 
 if __name__ == '__main__':
-    trio.run(main)
+    with suppress(KeyboardInterrupt):
+        trio.run(main(_anyio_backend="trio"))

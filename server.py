@@ -1,4 +1,5 @@
 import json
+from contextlib import suppress
 
 import trio
 import trio.testing
@@ -48,4 +49,5 @@ async def main():
 
 
 if __name__ == '__main__':
-    trio.run(main)
+    with suppress(KeyboardInterrupt):
+        trio.run(main)
