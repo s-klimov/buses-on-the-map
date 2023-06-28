@@ -1,9 +1,10 @@
-from contextlib import suppress, AsyncExitStack
 import itertools
 import json
 import logging
 import os
+import warnings
 from collections import deque
+from contextlib import suppress, AsyncExitStack
 from functools import wraps
 from pathlib import Path
 from random import randrange
@@ -13,8 +14,8 @@ import asyncstdlib as a
 import trio
 import trio_websocket
 from trio import MemoryReceiveChannel, MemorySendChannel
+from trio import TrioDeprecationWarning
 from trio_websocket import open_websocket_url
-
 
 ROUTES_DIR = 'routes'    # папка с маршрутами автобусов
 BUS_NUM_LENGTH = 3       # количество символов в номере автобуса
@@ -22,6 +23,7 @@ RELAUNCH_INTERVAL = (
     1  # интервал переподключения в секундах при обрыве соединения с сервером
 )
 
+warnings.filterwarnings(action='ignore', category=TrioDeprecationWarning)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%m/%d/%Y %H:%M:%S',
