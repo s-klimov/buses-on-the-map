@@ -125,6 +125,19 @@ def validate_routes_number(ctx, param, value):
     return value
 
 
+def get_log_level(ctx, param, value):
+    if value in [0, 1]:
+        level = logging.ERROR
+    elif value == 2:
+        level = logging.WARNING
+    elif value == 3:
+        level = logging.INFO
+    else:
+        level = logging.DEBUG
+
+    return level
+
+
 @click.command()
 @click.option(
     '--server',
@@ -164,7 +177,11 @@ def validate_routes_number(ctx, param, value):
     help='Задержка в обновлении координат сервера.',
 )
 @click.option(
-    '-v', '--verbose', count=True, help='Настройка логирования.'
+    '-v',
+    '--verbose',
+    count=True,
+    callback=get_log_level,
+    help='Настройка логирования.',
 )  # https://click.palletsprojects.com/en/8.1.x/options/#counting
 async def main(
     server,
@@ -176,16 +193,7 @@ async def main(
     verbose,
 ):
 
-    if verbose in [0, 1]:
-        level = logging.ERROR
-    elif verbose == 2:
-        level = logging.WARNING
-    elif verbose == 3:
-        level = logging.INFO
-    else:
-        level = logging.DEBUG
-
-    logger.setLevel(level)
+    logger.setLevel(verbose)
 
     send_channel, receive_channel = trio.open_memory_channel(0)
 

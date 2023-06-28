@@ -31,24 +31,41 @@ async def exchange_messages(request):
 async def listen_browser(ws):
 
     with suppress(ConnectionClosed):
-        while message := await ws.get_message():
+        while (message := await ws.get_message()) and json.loads(message).get(
+            'msgType'
+        ) == 'newBounds':
             logger.debug('%s', (message,))
+            bounds = json.loads(message)['data']
+            top_buses = {
+                bus_id: coordinate
+                for bus_id, coordinate in buses.items()
+                if is_inside(
+                    bounds=bounds, lat=coordinate['lat'], lng=coordinate['lng']
+                )
+            }
+            logger.debug('%d buses inside bounds' % (len(top_buses),))
 
 
 async def send_buses(ws):
 
     async for message in receive_channel:
-        buse = json.loads(message)
-        buses[buse['busId']] = buse
+        bus = json.loads(message)
+        buses[bus['busId']] = bus
 
         buses_msg = json.dumps(
             {'msgType': 'Buses', 'buses': list(buses.values())}
         )
-        logger.debug('%s', (buses_msg,))
         try:
             await ws.send_message(buses_msg)
         except ConnectionClosed:
             break
+
+
+def is_inside(bounds: dict, lat: float, lng: float):
+    return (
+        bounds['south_lat'] < lat < bounds['north_lat']
+        and bounds['west_lng'] < lng < bounds['east_lng']
+    )
 
 
 async def get_message(request):
@@ -60,22 +77,31 @@ async def get_message(request):
             await send_channel.send(message)
 
 
-@click.command()
-@click.option(
-    '-v', '--verbose', count=True, help='Настройка логирования.'
-)  # https://click.palletsprojects.com/en/8.1.x/options/#counting
-async def main(verbose):
-
-    if verbose in [0, 1]:
+def get_log_level(ctx, param, value):
+    if value in [0, 1]:
         level = logging.ERROR
-    elif verbose == 2:
+    elif value == 2:
         level = logging.WARNING
-    elif verbose == 3:
+    elif value == 3:
         level = logging.INFO
     else:
         level = logging.DEBUG
 
-    logger.setLevel(level)
+    return level
+
+
+@click.command()
+@click.option(
+    '-v',
+    '--verbose',
+    count=True,
+    callback=get_log_level,
+    help='Настройка логирования.',
+)  # https://click.palletsprojects.com/en/8.1.x/options/#counting
+async def main(verbose):
+
+    logger.setLevel(verbose)
+
     async with trio.open_nursery() as nursery:
         nursery.start_soon(
             serve_websocket, get_message, '127.0.0.1', 8080, None
