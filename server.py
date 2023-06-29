@@ -25,7 +25,7 @@ async def exchange_messages(request):
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(listen_browser, ws)
-        nursery.start_soon(send_buses, ws)
+        nursery.start_soon(send_buses, ws, bounds)
 
 
 async def listen_browser(ws):
@@ -36,6 +36,8 @@ async def listen_browser(ws):
         ) == 'newBounds':
             logger.debug('%s', (message,))
             bounds = json.loads(message)['data']
+
+            # FIXME удалить отладочный код
             top_buses = {
                 bus_id: coordinate
                 for bus_id, coordinate in buses.items()
@@ -46,14 +48,22 @@ async def listen_browser(ws):
             logger.debug('%d buses inside bounds' % (len(top_buses),))
 
 
-async def send_buses(ws):
+async def send_buses(ws, bounds):
 
     async for message in receive_channel:
         bus = json.loads(message)
         buses[bus['busId']] = bus
 
+        top_buses = {
+            bus_id: coordinate
+            for bus_id, coordinate in buses.items()
+            if is_inside(
+                bounds=bounds, lat=coordinate['lat'], lng=coordinate['lng']
+            )
+        }
+
         buses_msg = json.dumps(
-            {'msgType': 'Buses', 'buses': list(buses.values())}
+            {'msgType': 'Buses', 'buses': list(top_buses.values())}
         )
         try:
             await ws.send_message(buses_msg)
