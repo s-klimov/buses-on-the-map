@@ -78,14 +78,13 @@ async def get_message(request):
 
 
 def get_log_level(ctx, param, value):
-    if value in [0, 1]:
-        level = logging.ERROR
-    elif value == 2:
-        level = logging.WARNING
-    elif value == 3:
-        level = logging.INFO
-    else:
-        level = logging.DEBUG
+    levels = [
+        logging.ERROR,
+        logging.WARNING,
+        logging.INFO,
+        logging.DEBUG,
+    ]
+    level = levels[min(value, len(levels) - 1)]
 
     return level
 
