@@ -55,18 +55,18 @@ async def send_buses(ws, bounds):
 
     async for message in receive_channel:
         bus = json.loads(message)
-        buses[bus['busId']] = bus
+        if not bounds:
+            continue
 
-        top_buses = {
-            bus_id: coordinate
-            for bus_id, coordinate in buses.items()
-            if is_inside(
-                bounds=bounds, lat=coordinate['lat'], lng=coordinate['lng']
-            )
-        } if bounds else {}
+        if not is_inside(bounds=bounds, lat=bus['lat'], lng=bus['lng']):
+            buses.pop(bus['busId'], None)
+            continue
+
+        buses[bus['busId']] = bus
+        logger.debug('sent bus on the map %s' % (bus,))
 
         buses_msg = json.dumps(
-            {'msgType': 'Buses', 'buses': list(top_buses.values())}
+            {'msgType': 'Buses', 'buses': list(buses.values())}
         )
         try:
             await ws.send_message(buses_msg)
