@@ -23,19 +23,22 @@ logger = logging.getLogger('server')
 async def exchange_messages(request):
     ws = await request.accept()
 
+    bounds = dict()
+
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(listen_browser, ws)
+        nursery.start_soon(listen_browser, ws, bounds)
         nursery.start_soon(send_buses, ws, bounds)
 
 
-async def listen_browser(ws):
+async def listen_browser(ws, bounds):
 
     with suppress(ConnectionClosed):
         while (message := await ws.get_message()) and json.loads(message).get(
             'msgType'
         ) == 'newBounds':
             logger.debug('%s', (message,))
-            bounds = json.loads(message)['data']
+            bounds.clear()
+            bounds.update(json.loads(message)['data'])
 
             # FIXME удалить отладочный код
             top_buses = {
@@ -60,7 +63,7 @@ async def send_buses(ws, bounds):
             if is_inside(
                 bounds=bounds, lat=coordinate['lat'], lng=coordinate['lng']
             )
-        }
+        } if bounds else {}
 
         buses_msg = json.dumps(
             {'msgType': 'Buses', 'buses': list(top_buses.values())}
