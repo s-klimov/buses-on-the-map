@@ -2,6 +2,7 @@ import json
 import logging
 import warnings
 from contextlib import suppress
+from dataclasses import dataclass, asdict
 
 import trio
 import trio.testing
@@ -18,6 +19,18 @@ logging.basicConfig(
     datefmt='%m/%d/%Y %H:%M:%S',
 )
 logger = logging.getLogger('server')
+
+@dataclass
+class Bus:
+    """Автобус на карте"""
+    busId: str  # номер автобуса
+    lat: float  # географическая ширина местоположения автобуса
+    lng: float  # географическая долгота местоположения автобуса
+    route: str  # номер маршрута
+
+
+# @dataclass
+# class WindowBounds:
 
 
 async def exchange_messages(request):
@@ -40,33 +53,23 @@ async def listen_browser(ws, bounds):
             bounds.clear()
             bounds.update(json.loads(message)['data'])
 
-            # FIXME удалить отладочный код
-            top_buses = {
-                bus_id: coordinate
-                for bus_id, coordinate in buses.items()
-                if is_inside(
-                    bounds=bounds, lat=coordinate['lat'], lng=coordinate['lng']
-                )
-            }
-            logger.debug('%d buses inside bounds' % (len(top_buses),))
-
 
 async def send_buses(ws, bounds):
 
     async for message in receive_channel:
-        bus = json.loads(message)
+        bus = Bus(**json.loads(message))
         if not bounds:
             continue
 
-        if not is_inside(bounds=bounds, lat=bus['lat'], lng=bus['lng']):
-            buses.pop(bus['busId'], None)
+        if not is_inside(bounds=bounds, lat=bus.lat, lng=bus.lng):
+            buses.pop(bus.busId, None)
             continue
 
-        buses[bus['busId']] = bus
+        buses[bus.busId] = bus
         logger.debug('sent bus on the map %s' % (bus,))
 
         buses_msg = json.dumps(
-            {'msgType': 'Buses', 'buses': list(buses.values())}
+            {'msgType': 'Buses', 'buses': [asdict(bus) for bus in buses.values()]}
         )
         try:
             await ws.send_message(buses_msg)
