@@ -20,48 +20,86 @@ logging.basicConfig(
 )
 logger = logging.getLogger('server')
 
+
 @dataclass
 class Bus:
     """Автобус на карте"""
+
     busId: str  # номер автобуса
     lat: float  # географическая ширина местоположения автобуса
     lng: float  # географическая долгота местоположения автобуса
     route: str  # номер маршрута
 
 
-# @dataclass
-# class WindowBounds:
+@dataclass
+class WindowBounds:
+    """Координаты окна карты фронтенда"""
+
+    south_lat: float | None = None
+    north_lat: float | None = None
+    west_lng: float | None = None
+    east_lng: float | None = None
+
+    def is_inside(self, lat: float, lng: float) -> bool:
+        """Находится ли заданная координата внутри окна?
+        :param lat: Географиеская ширина координаты.
+        :param lng: Географиеская долгота координаты.
+        """
+        return (
+            self.south_lat < lat < self.north_lat
+            and self.west_lng < lng < self.east_lng
+        )
+
+    def is_none(self) -> bool:
+        """Возвращает значение Истина, если хотя бы одна из координат окна не определена."""
+        return (
+            self.south_lat is None
+            or self.north_lat is None
+            or self.west_lng is None
+            or self.east_lng is None
+        )
+
+    def update(
+        self,
+        south_lat: float = None,
+        north_lat: float = None,
+        west_lng: float = None,
+        east_lng: float = None,
+    ):
+        self.south_lat = south_lat
+        self.north_lat = north_lat
+        self.west_lng = west_lng
+        self.east_lng = east_lng
 
 
 async def exchange_messages(request):
     ws = await request.accept()
 
-    bounds = dict()
+    bounds = WindowBounds()
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(listen_browser, ws, bounds)
         nursery.start_soon(send_buses, ws, bounds)
 
 
-async def listen_browser(ws, bounds):
+async def listen_browser(ws, bounds: WindowBounds):
 
     with suppress(ConnectionClosed):
         while (message := await ws.get_message()) and json.loads(message).get(
             'msgType'
         ) == 'newBounds':
             logger.debug('%s', (message,))
-            bounds.clear()
-            bounds.update(json.loads(message)['data'])
+            bounds.update(**json.loads(message)['data'])
 
 
-async def send_buses(ws, bounds):
+async def send_buses(ws, bounds: WindowBounds):
 
     async for message in receive_channel:
         bus = Bus(**json.loads(message))
-        if not bounds:
+        if bounds.is_none():
             continue
 
-        if not is_inside(bounds=bounds, lat=bus.lat, lng=bus.lng):
+        if not bounds.is_inside(lat=bus.lat, lng=bus.lng):
             buses.pop(bus.busId, None)
             continue
 
@@ -69,19 +107,15 @@ async def send_buses(ws, bounds):
         logger.debug('sent bus on the map %s' % (bus,))
 
         buses_msg = json.dumps(
-            {'msgType': 'Buses', 'buses': [asdict(bus) for bus in buses.values()]}
+            {
+                'msgType': 'Buses',
+                'buses': [asdict(bus) for bus in buses.values()],
+            }
         )
         try:
             await ws.send_message(buses_msg)
         except ConnectionClosed:
             break
-
-
-def is_inside(bounds: dict, lat: float, lng: float):
-    return (
-        bounds['south_lat'] < lat < bounds['north_lat']
-        and bounds['west_lng'] < lng < bounds['east_lng']
-    )
 
 
 async def get_message(request):
