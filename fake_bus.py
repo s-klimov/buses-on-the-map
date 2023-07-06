@@ -114,7 +114,10 @@ async def send_updates(
         ]
         logger.info('Открыто %d сокетов.' % (len(sockets),))
         async for message in receive_channel:
-            await sockets[randrange(websockets_number)].send_message(message)
+            with suppress(KeyboardInterrupt):
+                await sockets[randrange(websockets_number)].send_message(
+                    message
+                )
 
 
 def validate_routes_number(ctx, param, value):
@@ -137,6 +140,7 @@ def get_log_level(ctx, param, value):
     return level
 
 
+# !!! Просьба не менять входные аргументы
 @click.command()
 @click.option(
     '--server',

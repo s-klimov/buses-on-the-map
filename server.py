@@ -72,7 +72,7 @@ class WindowBounds:
         self.east_lng = east_lng
 
 
-async def exchange_messages(request):
+async def talk_to_browser(request):
     ws = await request.accept()
 
     bounds = WindowBounds()
@@ -94,8 +94,7 @@ async def listen_browser(ws, bounds: WindowBounds):
 
 async def send_buses(ws, bounds: WindowBounds):
 
-    async for message in receive_channel:
-        bus = Bus(**json.loads(message))
+    async for bus in receive_channel:
         if bounds.is_none():
             continue
 
@@ -124,7 +123,28 @@ async def get_message(request):
     with suppress(ConnectionClosed):
         while message := await ws.get_message():
 
-            await send_channel.send(message)
+            # Проверяем полученную строку на валидность преобразования в json и на то, что полученный json
+            # имеет требуемую структуру
+            try:
+                bus = Bus(**json.loads(message))
+            except json.JSONDecodeError:
+                ws.send_message(
+                    '{"errors": ["Requires valid JSON"], "msgType": "Errors"}'
+                )
+            except TypeError:
+                ws.send_message(
+                    '{"errors": ["Requires msgType specified"], "msgType": "Errors"}'
+                )
+            else:
+                await send_channel.send(bus)
+
+
+def validate_port_number(ctx, param, value):
+    if not 0 <= value <= 65535:
+        raise click.BadParameter(
+            'Номер порта - ожидается целое число без знака, в диапазоне от 0 до 65535.'
+        )
+    return value
 
 
 def get_log_level(ctx, param, value):
@@ -139,7 +159,26 @@ def get_log_level(ctx, param, value):
     return level
 
 
+# !!! Просьба не менять входные аргументы
 @click.command()
+# bus_port - порт для имитатора автобусов
+# browser_port - порт для браузера
+@click.option(
+    '--bus_port',
+    type=int,
+    default=8080,
+    show_default=True,
+    callback=validate_port_number,
+    help='Порт для имитатора автобусов.',
+)
+@click.option(
+    '--browser_port',
+    type=int,
+    default=8000,
+    show_default=True,
+    callback=validate_port_number,
+    help='Порт для браузера.',
+)
 @click.option(
     '-v',
     '--verbose',
@@ -147,16 +186,16 @@ def get_log_level(ctx, param, value):
     callback=get_log_level,
     help='Настройка логирования.',
 )  # https://click.palletsprojects.com/en/8.1.x/options/#counting
-async def main(verbose):
+async def main(bus_port, browser_port, verbose):
 
     logger.setLevel(verbose)
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(
-            serve_websocket, get_message, '127.0.0.1', 8080, None
+            serve_websocket, get_message, '127.0.0.1', bus_port, None
         )
         nursery.start_soon(
-            serve_websocket, exchange_messages, '127.0.0.1', 8000, None
+            serve_websocket, talk_to_browser, '127.0.0.1', browser_port, None
         )
 
 
