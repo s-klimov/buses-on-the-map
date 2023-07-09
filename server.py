@@ -10,6 +10,7 @@ import asyncclick as click
 from trio import TrioDeprecationWarning
 from trio_websocket import serve_websocket, ConnectionClosed
 
+from validators import is_coordinate_valid
 
 warnings.filterwarnings(action='ignore', category=TrioDeprecationWarning)
 send_channel, receive_channel = trio.open_memory_channel(0)
@@ -29,6 +30,24 @@ class Bus:
     lat: float  # географическая ширина местоположения автобуса
     lng: float  # географическая долгота местоположения автобуса
     route: str  # номер маршрута
+
+    def __post_init__(self):
+        if not isinstance(self.busId, str):
+            raise ValueError(
+                f'{self.busId}: Номер автобуса должен быть задан строкой.'
+            )
+        if not isinstance(self.lat, float):
+            raise ValueError(
+                f'{self.lat}: Географическая широта местоположения автобуса должна быть числом с плавающей точкой.'
+            )
+        if not isinstance(self.lng, float):
+            raise ValueError(
+                f'{self.lng}: Географическая долгота местоположения автобуса должна быть числом с плавающей точкой.'
+            )
+        if not isinstance(self.route, str):
+            raise ValueError(
+                f'{self.route}: Номер маршрута должен быть задан строкой.'
+            )
 
 
 @dataclass
@@ -123,20 +142,11 @@ async def get_message(request):
     with suppress(ConnectionClosed):
         while message := await ws.get_message():
 
-            # Проверяем полученную строку на валидность преобразования в json и на то, что полученный json
-            # имеет требуемую структуру
-            try:
-                bus = Bus(**json.loads(message))
-            except json.JSONDecodeError:
-                ws.send_message(
-                    '{"errors": ["Requires valid JSON"], "msgType": "Errors"}'
-                )
-            except TypeError:
-                ws.send_message(
-                    '{"errors": ["Requires msgType specified"], "msgType": "Errors"}'
-                )
+            is_valid, message = is_coordinate_valid(message, Bus)
+            if is_valid:
+                await send_channel.send(Bus(**json.loads(message)))
             else:
-                await send_channel.send(bus)
+                ws.send_message(message)
 
 
 def validate_port_number(ctx, param, value):
