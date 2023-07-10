@@ -10,7 +10,7 @@ import asyncclick as click
 from trio import TrioDeprecationWarning
 from trio_websocket import serve_websocket, ConnectionClosed
 
-from validators import is_coordinate_valid
+from validators import is_instance_valid
 
 warnings.filterwarnings(action='ignore', category=TrioDeprecationWarning)
 send_channel, receive_channel = trio.open_memory_channel(0)
@@ -90,6 +90,41 @@ class WindowBounds:
         self.west_lng = west_lng
         self.east_lng = east_lng
 
+    def __post_init__(self):
+
+        if not (self.south_lat is None or isinstance(self.south_lat, float)):
+            raise ValueError(
+                f'{self.south_lat}: Нижняя граница карты быть числом с плавающей точкой.'
+            )
+        if not (self.north_lat is None or isinstance(self.north_lat, float)):
+            raise ValueError(
+                f'{self.north_lat}: Верхняя граница карты должна быть числом с плавающей точкой.'
+            )
+        if not (self.west_lng is None or isinstance(self.west_lng, float)):
+            raise ValueError(
+                f'{self.west_lng}: Левая граница карты должна быть числом с плавающей точкой.'
+            )
+        if not (self.east_lng is None or isinstance(self.east_lng, float)):
+            raise ValueError(
+                f'{self.east_lng}: Правая граница карты должна быть числом с плавающей точкой.'
+            )
+
+
+@dataclass
+class Bounds:
+    """Ответ фронтенда"""
+
+    msgType: str
+    data: WindowBounds
+
+    def __post_init__(self):
+        if not (isinstance(self.msgType, str) and self.msgType == 'newBounds'):
+            raise ValueError(
+                f'{self.msgType}: Тип сообщения должен быть строкой "newBounds".'
+            )
+
+        self.data = WindowBounds(**self.data)
+
 
 async def talk_to_browser(request):
     ws = await request.accept()
@@ -107,8 +142,10 @@ async def listen_browser(ws, bounds: WindowBounds):
         while (message := await ws.get_message()) and json.loads(message).get(
             'msgType'
         ) == 'newBounds':
+            is_valid, message = is_instance_valid(message, Bounds)
             logger.debug('%s', (message,))
-            bounds.update(**json.loads(message)['data'])
+            if is_valid:
+                bounds.update(**json.loads(message)['data'])
 
 
 async def send_buses(ws, bounds: WindowBounds):
@@ -142,7 +179,7 @@ async def get_message(request):
     with suppress(ConnectionClosed):
         while message := await ws.get_message():
 
-            is_valid, message = is_coordinate_valid(message, Bus)
+            is_valid, message = is_instance_valid(message, Bus)
             if is_valid:
                 await send_channel.send(Bus(**json.loads(message)))
             else:

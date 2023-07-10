@@ -1,12 +1,13 @@
 import json
+from dataclasses import dataclass
 from typing import Any
 
 
-def is_coordinate_valid(message: str, bus_type: Any) -> (bool, str):
+def is_instance_valid(message: str, instance_type: dataclass) -> (bool, str):
     # Проверяем полученную строку на валидность преобразования в json и на то, что полученный json
     # имеет требуемую структуру
     try:
-        bus_type(**json.loads(message))
+        instance_type(**json.loads(message))
     except json.JSONDecodeError:
         return (
             False,
