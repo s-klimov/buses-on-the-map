@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import warnings
 from contextlib import suppress
 from dataclasses import dataclass, asdict
@@ -11,6 +12,8 @@ from trio import TrioDeprecationWarning
 from trio_websocket import serve_websocket, ConnectionClosed
 
 from validators import is_instance_valid
+
+REFRESH_TIMEOUT = 0.2  # Задержка в обновлении координат сервера.
 
 warnings.filterwarnings(action='ignore', category=TrioDeprecationWarning)
 send_channel, receive_channel = trio.open_memory_channel(0)
@@ -150,6 +153,8 @@ async def listen_browser(ws, bounds: WindowBounds):
 
 async def send_buses(ws, bounds: WindowBounds):
 
+    start = time.monotonic()
+
     async for bus in receive_channel:
         if bounds.is_none():
             continue
@@ -165,10 +170,13 @@ async def send_buses(ws, bounds: WindowBounds):
             {
                 'msgType': 'Buses',
                 'buses': [asdict(bus) for bus in buses.values()],
-            }
+            },
+            ensure_ascii=False,
         )
         try:
-            await ws.send_message(buses_msg)
+            if time.monotonic() - start >= REFRESH_TIMEOUT:
+                await ws.send_message(buses_msg)
+                start = time.monotonic()
         except ConnectionClosed:
             break
 
@@ -208,8 +216,13 @@ def get_log_level(ctx, param, value):
 
 # !!! Просьба не менять входные аргументы
 @click.command()
-# bus_port - порт для имитатора автобусов
-# browser_port - порт для браузера
+@click.option(
+    '--refresh_timeout',
+    type=float,
+    default=REFRESH_TIMEOUT,
+    show_default=True,
+    help='Задержка в обновлении координат сервера.',
+)
 @click.option(
     '--bus_port',
     type=int,
@@ -233,9 +246,12 @@ def get_log_level(ctx, param, value):
     callback=get_log_level,
     help='Настройка логирования.',
 )  # https://click.palletsprojects.com/en/8.1.x/options/#counting
-async def main(bus_port, browser_port, verbose):
+async def main(refresh_timeout, bus_port, browser_port, verbose):
 
     logger.setLevel(verbose)
+
+    global REFRESH_TIMEOUT
+    REFRESH_TIMEOUT = refresh_timeout
 
     async with trio.open_nursery() as nursery:
         nursery.start_soon(

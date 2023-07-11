@@ -175,9 +175,9 @@ def get_log_level(ctx, param, value):
 @click.option(
     '--refresh_timeout',
     type=float,
-    default=0.1,
+    default=0.3,
     show_default=True,
-    help='Задержка в обновлении координат сервера.',
+    help='Пауза между отправками следующих координат фейковых автобусов.',
 )
 @click.option(
     '-v',
