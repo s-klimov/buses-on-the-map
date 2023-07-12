@@ -1,3 +1,5 @@
+"""Скрипт имитации автобусов"""
+
 import itertools
 import json
 import logging
@@ -32,6 +34,10 @@ logger = logging.getLogger('fake-bus')
 
 
 async def load_routes(directory_path=ROUTES_DIR):
+    """
+    Генератор, который возвращает json'ы с маршрутами из файлов папки с маршрутами.
+    :param directory_path: Имя/путь папки с json-файлами, содержащими маршруты.
+    """
     for filename in os.listdir(directory_path):
         logger.info('Открываем файл %s' % (filename,))
         if filename.endswith('.json'):
@@ -52,11 +58,11 @@ async def run_bus(
     /,
 ):
     """
-
-    :param send_channel:
-    :param bus_id:
-    :param points:
-    :param route_name:
+    Хэндлер запуска автобуса в очередь trio.
+    :param send_channel: Очередь trio.
+    :param bus_id: Номер автобуса.
+    :param points: Точки маршрута.
+    :param route_name: Номер маршрута.
     :param refresh_timeout: Интервал в секундах между перемещениями автобусов по точкам маршрутов на карте.
     """
     for lat, long in itertools.cycle(points):
@@ -71,10 +77,16 @@ async def run_bus(
 
 
 def generate_bus_id(route_id, bus_index, emulator_id):
+    """Генератор номера автобуса."""
     return f'{route_id}-{emulator_id}{str(bus_index).zfill(BUS_NUM_LENGTH)}'
 
 
 def relaunch_on_disconnect(f):
+    """
+    Декоратор, отслеживающий соединение с сервером.
+    При обнаружении разрыва соединения происходит попытка нового подключения.
+    """
+
     @wraps(f)
     async def wrapper(*args, **kwds):
         with suppress(KeyboardInterrupt):
@@ -120,7 +132,8 @@ async def send_updates(
                 )
 
 
-def validate_routes_number(ctx, param, value):
+def validate_routes_number(ctx, param, value) -> int:
+    """Валидатор для параметра routes_number. Ограничен количеством файлов с маршрутами в папке routes."""
     if value < 1 or value > 595:
         raise click.BadParameter(
             'Количество маршрутов должно быть от 1 до 595.'
@@ -128,7 +141,8 @@ def validate_routes_number(ctx, param, value):
     return value
 
 
-def get_log_level(ctx, param, value):
+def get_log_level(ctx, param, value) -> int:
+    """Преобразует количество указанных v (verbose) в параметрах скрипта к уровню логирования"""
     levels = [
         logging.ERROR,
         logging.WARNING,

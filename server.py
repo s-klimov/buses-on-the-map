@@ -1,3 +1,5 @@
+# Скрипт сервера для обмена сообщенями с браузером и с модулем получения координат автобусов
+
 import json
 import logging
 import time
@@ -130,6 +132,7 @@ class Bounds:
 
 
 async def talk_to_browser(request):
+    """Хэндлер обмена сообщениями с браузером."""
     ws = await request.accept()
 
     bounds = WindowBounds()
@@ -140,11 +143,14 @@ async def talk_to_browser(request):
 
 
 async def listen_browser(ws, bounds: WindowBounds):
-
+    """
+    Получает сообщение от браузера с координатами окна.
+    :param bounds: Ссылка на экземпляр класса координат окна, используется для сохранения новых координат и передачи в
+    вызывающую функцию.
+    :param ws: Ссылка на экземпляр web сокета обмена сообщениями с браузером
+    """
     with suppress(ConnectionClosed):
-        while (message := await ws.get_message()) and json.loads(message).get(
-            'msgType'
-        ) == 'newBounds':
+        while message := await ws.get_message():
             is_valid, message = is_instance_valid(message, Bounds)
             logger.debug('%s', (message,))
             if is_valid:
@@ -152,7 +158,12 @@ async def listen_browser(ws, bounds: WindowBounds):
 
 
 async def send_buses(ws, bounds: WindowBounds):
-
+    """
+    Получает сообщение от браузера с координатами окна.
+    :param bounds: Ссылка на экземпляр класса координат окна. Используется для вычисления автобусов, которые должны
+    быть отражены в этом окне (чтобы не перегружать браузер сообщениями).
+    :param ws: Ссылка на экземпляр web сокета обмена сообщениями с браузером.
+    """
     start = time.monotonic()
 
     async for bus in receive_channel:
@@ -182,6 +193,10 @@ async def send_buses(ws, bounds: WindowBounds):
 
 
 async def get_message(request):
+    """
+    Хэндлер получения сообщений с координатами автобусов.
+    В очередь для обработки помещаются только валидированные сообщения.
+    """
     ws = await request.accept()
 
     with suppress(ConnectionClosed):
@@ -195,6 +210,7 @@ async def get_message(request):
 
 
 def validate_port_number(ctx, param, value):
+    """Валидатор для параметра port_number скрипта"""
     if not 0 <= value <= 65535:
         raise click.BadParameter(
             'Номер порта - ожидается целое число без знака, в диапазоне от 0 до 65535.'
@@ -203,6 +219,7 @@ def validate_port_number(ctx, param, value):
 
 
 def get_log_level(ctx, param, value):
+    """Преобразует количество указанных v (verbose) в параметрах скрипта к уровню логирования"""
     levels = [
         logging.ERROR,
         logging.WARNING,
